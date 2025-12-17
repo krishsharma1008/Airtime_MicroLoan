@@ -1,0 +1,209 @@
+================================================================================
+AIRTIME MICRO-LOANS POC - DEVELOPMENT DOCUMENTATION
+================================================================================
+
+Date: 2024-12-19
+Time: Implementation completed
+
+================================================================================
+PROJECT OVERVIEW
+================================================================================
+
+Built a comprehensive POC for airtime micro-loans with the following key features:
+- Real-time event simulation (calls, balance, top-ups)
+- ML-driven dynamic loan amounts with explainability
+- Two-screen demo (User consent + Operations cockpit)
+- Automatic repayment simulation
+- WebSocket real-time updates
+
+================================================================================
+ARCHITECTURE DECISIONS
+================================================================================
+
+1. TECH STACK
+   - Backend: Node.js + TypeScript + Express
+   - Frontend: React + TypeScript + Vite + Tailwind CSS
+   - Real-time: WebSocket for live event streaming
+   - Data: In-memory store (easily swappable for real DB)
+
+2. SERVICE LAYER
+   - MnoEventSimulator: Generates call/balance/top-up events
+   - TriggerService: Detects low-balance during active calls
+   - FeatureStoreMock: Serves feature vectors for model
+   - ModelService: Emulates ML decision with explainability
+   - EligibilityService: Applies hard gates + policy constraints
+   - OfferService: Creates offers with consent tokens
+   - SmsGatewayMock: Simulates SMS delivery
+   - DisbursalService: Simulates airtime credit application
+   - RepaymentService: Handles auto-repayment on top-up
+   - LedgerService: Immutable audit trail
+   - Orchestrator: Wires all services together
+
+3. DATA MODEL
+   - UserProfile: User characteristics and history
+   - FeatureVector: Model input features
+   - ModelDecision: ML outputs with contributions
+   - Offer: Loan offer with reasons and benefit estimates
+   - Loan: Disbursed loan tracking
+   - LedgerEvent: Immutable audit events
+
+================================================================================
+KEY FEATURES IMPLEMENTED
+================================================================================
+
+1. USER SCREEN (Consent Page)
+   - Mobile-optimized design
+   - Transparent "why this offer" panel
+   - Benefit estimator (voice minutes / data days)
+   - Clear terms and opt-out option
+   - Real-time expiry timer
+   - Accept/decline flow with confirmation
+
+2. COCKPIT SCREEN (Operations Dashboard)
+   - Persona selector with 5 pre-seeded personas
+   - Simulation controls (start/end call, top-up)
+   - Real-time user status (balance, active call, offers, loans)
+   - Live event timeline with WebSocket updates
+   - KPI dashboard (acceptance rate, repayment rate, etc.)
+   - Recent offers list
+   - Explainability panel showing:
+     * Model name/version
+     * Repayment probability
+     * Confidence score
+     * Feature contributions
+     * User-facing reasons
+   - Audit ledger view
+
+3. MODEL EMULATOR
+   - Deterministic but realistic ML-like outputs
+   - Feature contributions (SHAP-style)
+   - P_repay calculation based on features
+   - Confidence scoring
+   - Recommended limit calculation
+   - Policy constraints (buckets, caps)
+   - User-facing reason generation
+
+4. EVENT SIMULATION
+   - Call start/end events
+   - Balance depletion every 5 seconds during calls
+   - Low-balance trigger at $0.50 threshold
+   - Top-up events with automatic repayment
+   - Real-time WebSocket broadcasting
+
+5. TRANSPARENCY & EXPLAINABILITY
+   - Model version tracking
+   - Feature snapshot persistence
+   - Contribution analysis
+   - User-facing plain-language reasons
+   - Full decision trace in cockpit
+
+================================================================================
+API ENDPOINTS
+================================================================================
+
+Personas & Simulation:
+- GET /api/personas
+- POST /api/personas/:name/init
+- POST /api/calls/start
+- POST /api/calls/end
+- POST /api/topup
+
+Offers & Consent:
+- GET /api/offers/:token
+- POST /api/consent
+- GET /api/offers
+- GET /api/offers/:offerId/explain
+
+Monitoring:
+- GET /api/users/:msisdn
+- GET /api/loans
+- GET /api/kpis
+- GET /api/ledger
+- GET /api/sms
+
+================================================================================
+PERSONAS SEEDED
+================================================================================
+
+1. onTimeRepayer: Perfect repayment, high tenure, frequent top-ups
+2. frequentUser: Active user, good repayment history
+3. newUser: Low tenure, minimal history
+4. riskyUser: Poor repayment, infrequent top-ups
+5. optedOut: User who opted out of offers
+
+================================================================================
+TESTING STRATEGY
+================================================================================
+
+Unit tests planned for:
+- Triggering rules (debounce, cooldown)
+- Eligibility gates
+- Model emulator outputs
+- Offer expiry
+- Repayment logic
+
+Integration tests planned for:
+- End-to-end flow: low-balance → SMS → accept → disburse → top-up → repay
+- Failure modes: SMS failure, offer expiry, user decline
+
+================================================================================
+NEXT STEPS (IF MOVING TO PRODUCTION)
+================================================================================
+
+1. Replace in-memory store with real database (PostgreSQL/MongoDB)
+2. Integrate real MNO event feeds (IN triggers, charging system)
+3. Replace model emulator with trained ML model
+4. Integrate real SMS gateway
+5. Add real payment processing for disbursal/repayment
+6. Add authentication/authorization
+7. Add rate limiting and security hardening
+8. Add comprehensive error handling and retries
+9. Add monitoring and alerting
+10. Add data persistence and backup
+
+================================================================================
+FILES CREATED
+================================================================================
+
+Backend:
+- backend/src/types/schemas.ts (Complete type definitions)
+- backend/src/store/inMemoryStore.ts (Data store)
+- backend/src/data/personas.ts (Seeded personas)
+- backend/src/services/mnoEventSimulator.ts
+- backend/src/services/triggerService.ts
+- backend/src/services/featureStore.ts
+- backend/src/services/modelService.ts
+- backend/src/services/eligibilityService.ts
+- backend/src/services/offerService.ts
+- backend/src/services/smsGateway.ts
+- backend/src/services/disbursalService.ts
+- backend/src/services/repaymentService.ts
+- backend/src/services/ledgerService.ts
+- backend/src/services/orchestrator.ts
+- backend/src/index.ts (API server)
+
+Frontend:
+- frontend/src/screens/UserScreen.tsx (Consent page)
+- frontend/src/screens/CockpitScreen.tsx (Monitoring dashboard)
+- frontend/src/App.tsx (Router)
+- frontend/src/types.ts (Frontend types)
+- frontend/src/main.tsx
+- frontend/src/index.css
+
+Configuration:
+- package.json (root)
+- backend/package.json
+- frontend/package.json
+- backend/tsconfig.json
+- frontend/tsconfig.json
+- frontend/vite.config.ts
+- frontend/tailwind.config.js
+- frontend/postcss.config.js
+- .gitignore
+- README.md
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================
+
+
