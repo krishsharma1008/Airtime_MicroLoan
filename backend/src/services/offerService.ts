@@ -4,10 +4,11 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import type { Offer, OfferStatus } from '../types/schemas.js';
+import type { Offer, OfferStatus, LedgerEventType } from '../types/schemas.js';
 import { store } from '../store/inMemoryStore.js';
 import { eligibilityService } from './eligibilityService.js';
 import { ledgerService } from './ledgerService.js';
+import { buildOfferContextReasons } from './insightService.js';
 
 const OFFER_EXPIRY_MINUTES = 10; // Offers expire in 10 minutes
 
@@ -56,6 +57,7 @@ export class OfferService {
       model_decision_id: eligibility.modelDecision.decision_id,
       consent_token: uuidv4(), // Short-lived token
       benefit_estimate: eligibility.benefitEstimate,
+      context_reasons: buildOfferContextReasons(msisdn),
     };
 
     store.setOffer(offer);
@@ -115,7 +117,7 @@ export class OfferService {
     }
   }
 
-  private getLedgerEventTypeForStatus(status: OfferStatus): string | null {
+  private getLedgerEventTypeForStatus(status: OfferStatus): LedgerEventType | null {
     switch (status) {
       case 'link_opened':
         return 'link_opened';
@@ -170,5 +172,3 @@ export class OfferService {
 }
 
 export const offerService = new OfferService();
-
-

@@ -165,6 +165,7 @@ export const OfferSchema = z.object({
     voice_minutes: z.number().optional(),
     data_days: z.number().optional(),
   }).optional(),
+  context_reasons: z.array(z.string()).optional(),
 });
 
 export type Offer = z.infer<typeof OfferSchema>;
@@ -234,6 +235,37 @@ export const SmsMessageSchema = z.object({
 export type SmsMessage = z.infer<typeof SmsMessageSchema>;
 
 // ============================================================================
+// Journey / Timeline Events
+// ============================================================================
+
+export const JourneyEventTypeSchema = z.enum([
+  'call_start',
+  'call_end',
+  'balance_low',
+  'offer_created',
+  'sms_sent',
+  'link_opened',
+  'offer_accepted',
+  'offer_declined',
+  'loan_disbursed',
+  'topup',
+  'repayment_completed',
+]);
+
+export type JourneyEventType = z.infer<typeof JourneyEventTypeSchema>;
+
+export const JourneyEventSchema = z.object({
+  event_id: z.string().uuid(),
+  msisdn: z.string(),
+  type: JourneyEventTypeSchema,
+  label: z.string(),
+  timestamp: z.date(),
+  metadata: z.record(z.any()).optional(),
+});
+
+export type JourneyEvent = z.infer<typeof JourneyEventSchema>;
+
+// ============================================================================
 // Union type for all events
 // ============================================================================
 
@@ -258,5 +290,3 @@ export const ConsentResponseSchema = z.object({
 });
 
 export type ConsentResponse = z.infer<typeof ConsentResponseSchema>;
-
-

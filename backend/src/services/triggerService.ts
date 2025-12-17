@@ -7,9 +7,9 @@ import { v4 as uuidv4 } from 'uuid';
 import type { LowBalanceTriggerEvent, BalanceUpdateEvent } from '../types/schemas.js';
 import { store } from '../store/inMemoryStore.js';
 
-const LOW_BALANCE_THRESHOLD = 0.5; // $0.50
-const DEBOUNCE_MS = 10000; // 10 seconds - don't trigger multiple times quickly
-const COOLDOWN_MS = 300000; // 5 minutes - don't offer again too soon
+const LOW_BALANCE_THRESHOLD = 1.0; // $1.00 threshold for demo speed
+const DEBOUNCE_MS = 3000; // 3 seconds - accelerate repeated triggers for the POC
+const COOLDOWN_MS = 60000; // 1 minute cooldown keeps pace with faster journeys
 
 export class TriggerService {
   private lastTriggerTime: Map<string, number> = new Map(); // msisdn -> timestamp
@@ -69,5 +69,4 @@ export class TriggerService {
 }
 
 export const triggerService = new TriggerService();
-
 

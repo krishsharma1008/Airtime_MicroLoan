@@ -29,7 +29,7 @@ export default function UserScreen() {
         }
         setLoading(false)
       })
-      .catch((err) => {
+      .catch(() => {
         setError('Failed to load offer')
         setLoading(false)
       })
@@ -52,6 +52,7 @@ export default function UserScreen() {
         setAction('idle')
       }
     } catch (err) {
+      console.error('Failed to accept offer', err)
       setError('Failed to accept offer')
       setAction('idle')
     }
@@ -74,6 +75,7 @@ export default function UserScreen() {
         setAction('idle')
       }
     } catch (err) {
+      console.error('Failed to decline offer', err)
       setError('Failed to decline offer')
       setAction('idle')
     }
@@ -282,5 +284,3 @@ export default function UserScreen() {
     </div>
   )
 }
-
-

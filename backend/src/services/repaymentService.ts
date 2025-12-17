@@ -8,6 +8,16 @@ import { store } from '../store/inMemoryStore.js';
 import { ledgerService } from './ledgerService.js';
 
 export class RepaymentService {
+  private eventCallbacks: ((event: { type: string; data: any }) => void)[] = [];
+
+  onEvent(callback: (event: { type: string; data: any }) => void): void {
+    this.eventCallbacks.push(callback);
+  }
+
+  private emitEvent(type: string, data: any): void {
+    this.eventCallbacks.forEach((cb) => cb({ type, data }));
+  }
+
   /**
    * Process top-up and check for automatic repayment
    */
@@ -87,9 +97,14 @@ export class RepaymentService {
         repaid_at: loan.repaid_at,
       },
     });
+
+    this.emitEvent('repayment_completed', {
+      msisdn: loan.msisdn,
+      loan_id: loan.loan_id,
+      amount: loan.amount,
+    });
   }
 }
 
 export const repaymentService = new RepaymentService();
-
 

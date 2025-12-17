@@ -44,8 +44,21 @@ export class MnoEventSimulator {
     store.setCallSession(sessionId, callStart);
     this.emitEvent(callStart);
 
+    const latestBalance = store.getLatestBalance(msisdn)?.balance ?? 0;
+    const startingBalance = Math.max(2, latestBalance);
+    const initialBalanceUpdate: BalanceUpdateEvent = {
+      event_type: 'balance_update',
+      msisdn,
+      session_id: sessionId,
+      balance: startingBalance,
+      timestamp: new Date(),
+      consumption_rate_per_min: 60,
+    };
+    store.addBalanceUpdate(msisdn, initialBalanceUpdate);
+    this.emitEvent(initialBalanceUpdate);
+
     // Start balance depletion simulation
-    this.simulateBalanceDepletion(msisdn, sessionId);
+    this.simulateBalanceDepletion(msisdn, sessionId, startingBalance);
 
     return sessionId;
   }
@@ -77,15 +90,17 @@ export class MnoEventSimulator {
 
   /**
    * Simulate balance depletion during a call
-   * Updates balance every 5-10 seconds
+   * Speeds up consumption for demo purposes so journeys finish quickly
    */
-  private simulateBalanceDepletion(msisdn: string, sessionId: string): void {
+  private simulateBalanceDepletion(msisdn: string, sessionId: string, initialBalance: number): void {
     const user = store.getUser(msisdn);
     if (!user) return;
 
     // Get current balance or start with a small amount
-    let currentBalance = store.getLatestBalance(msisdn)?.balance || 2.0; // Start with $2
-    const consumptionRate = 0.1; // $0.10 per minute
+    let currentBalance = initialBalance || store.getLatestBalance(msisdn)?.balance || 2.0; // Start with $2
+    const intervalMs = 1000;
+    const consumptionRatePerMin = 60; // $1 per second
+    const depletionPerTick = 1; // Exactly $1 per tick
 
     const key = `${msisdn}_${sessionId}`;
     const interval = setInterval(() => {
@@ -96,8 +111,8 @@ export class MnoEventSimulator {
         return;
       }
 
-      // Deplete balance
-      currentBalance = Math.max(0, currentBalance - (consumptionRate / 12)); // Update every 5s = 1/12 of minute
+      // Deplete balance ($1 per second)
+      currentBalance = Math.max(0, currentBalance - depletionPerTick);
 
       const balanceUpdate: BalanceUpdateEvent = {
         event_type: 'balance_update',
@@ -105,14 +120,14 @@ export class MnoEventSimulator {
         session_id: sessionId,
         balance: currentBalance,
         timestamp: new Date(),
-        consumption_rate_per_min: consumptionRate,
+        consumption_rate_per_min: consumptionRatePerMin,
       };
 
       store.addBalanceUpdate(msisdn, balanceUpdate);
       this.emitEvent(balanceUpdate);
 
       // If balance is very low, we'll let TriggerService handle the low_balance_trigger
-    }, 5000); // Every 5 seconds
+    }, intervalMs);
 
     this.activeSimulations.set(key, interval);
   }
@@ -150,7 +165,7 @@ export class MnoEventSimulator {
       msisdn,
       balance: newBalance,
       timestamp: new Date(),
-      consumption_rate_per_min: 0.1,
+      consumption_rate_per_min: 60,
     };
 
     store.addBalanceUpdate(msisdn, balanceUpdate);
@@ -167,5 +182,3 @@ export class MnoEventSimulator {
 }
 
 export const simulator = new MnoEventSimulator();
-
-

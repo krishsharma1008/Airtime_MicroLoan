@@ -52,7 +52,7 @@ export class FeatureStoreMock {
       total_repaid: repaidLoans,
       // Usage patterns
       recent_call_drops: user.recent_call_drops,
-      avg_call_duration_minutes,
+      avg_call_duration_minutes: avgCallDurationMinutes,
       recent_low_balance_events: recentLowBalanceEvents,
       // Device/location proxies
       device_type: user.device_type,
@@ -63,5 +63,4 @@ export class FeatureStoreMock {
 }
 
 export const featureStore = new FeatureStoreMock();
-
 

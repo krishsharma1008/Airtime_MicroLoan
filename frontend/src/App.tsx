@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import UserScreen from './screens/UserScreen'
 import CockpitScreen from './screens/CockpitScreen'
@@ -16,5 +15,4 @@ function App() {
 }
 
 export default App
-
 

@@ -3,7 +3,7 @@
  * Wires together all services to handle the end-to-end flow
  */
 
-import type { MnoEvent, LowBalanceTriggerEvent } from '../types/schemas.js';
+import type { MnoEvent, LowBalanceTriggerEvent, Offer } from '../types/schemas.js';
 import { simulator } from './mnoEventSimulator.js';
 import { triggerService } from './triggerService.js';
 import { offerService } from './offerService.js';
@@ -11,6 +11,7 @@ import { smsGateway } from './smsGateway.js';
 import { disbursalService } from './disbursalService.js';
 import { repaymentService } from './repaymentService.js';
 import { store } from '../store/inMemoryStore.js';
+import { journeyService } from './journeyService.js';
 
 export class Orchestrator {
   private eventCallbacks: ((event: any) => void)[] = [];
@@ -26,13 +27,18 @@ export class Orchestrator {
     this.eventCallbacks.forEach((cb) => cb(event));
   }
 
+  private broadcast(event: any): void {
+    this.emitEvent(event);
+    journeyService.ingestRealtimeEvent(event);
+  }
+
   /**
    * Initialize the orchestrator and wire up event handlers
    */
   initialize(): void {
     // Wire MNO simulator events
     simulator.onEvent((event: MnoEvent) => {
-      this.emitEvent({ type: 'mno_event', data: event });
+      this.broadcast({ type: 'mno_event', data: event });
 
       // Handle balance updates
       if (event.event_type === 'balance_update') {
@@ -42,24 +48,29 @@ export class Orchestrator {
       // Handle top-ups
       if (event.event_type === 'topup') {
         repaymentService.processTopUp(event);
-        this.emitEvent({ type: 'topup_processed', data: event });
+        this.broadcast({ type: 'topup_processed', data: event });
       }
+    });
+
+    repaymentService.onEvent((event) => {
+      this.broadcast(event);
     });
 
     // Wire trigger service
     triggerService.onTrigger((trigger: LowBalanceTriggerEvent) => {
-      this.emitEvent({ type: 'low_balance_trigger', data: trigger });
+      this.broadcast({ type: 'low_balance_trigger', data: trigger });
 
       // Create offer
       const offer = offerService.createOffer(trigger.msisdn, trigger.session_id);
       if (offer) {
-        this.emitEvent({ type: 'offer_created', data: offer });
+        this.broadcast({ type: 'offer_created', data: offer });
 
         // Send SMS
         const sms = smsGateway.sendOfferSms(offer);
-        this.emitEvent({ type: 'sms_sent', data: sms });
+        this.broadcast({ type: 'sms_sent', data: sms });
+        this.scheduleAutoAdvance(offer);
       } else {
-        this.emitEvent({ type: 'offer_not_created', data: { msisdn: trigger.msisdn, reason: 'not_eligible' } });
+        this.broadcast({ type: 'offer_not_created', data: { msisdn: trigger.msisdn, reason: 'not_eligible' } });
       }
     });
   }
@@ -88,51 +99,62 @@ export class Orchestrator {
   /**
    * Handle consent (accept/decline)
    */
-  handleConsent(token: string, action: 'accept' | 'decline'): { success: boolean; loanId?: string; message: string } {
+  handleConsent(
+    token: string,
+    action: 'accept' | 'decline',
+    source: 'auto' | 'user' = 'user'
+  ): { success: boolean; loanId?: string; message: string } {
     const offer = offerService.getOfferByToken(token);
     if (!offer) {
       return { success: false, message: 'Offer not found or expired' };
     }
 
-    if (action === 'accept') {
-      const accepted = offerService.acceptOffer(offer.offer_id);
-      if (!accepted) {
-        return { success: false, message: 'Unable to accept offer' };
-      }
+      if (action === 'accept') {
+        const accepted = offerService.acceptOffer(offer.offer_id);
+        if (!accepted) {
+          return { success: false, message: 'Unable to accept offer' };
+        }
 
-      this.emitEvent({ type: 'offer_accepted', data: offer });
+        this.broadcast({ type: 'offer_accepted', data: { ...offer, source } });
 
-      // Disburse loan
-      const loan = disbursalService.disburseLoan(offer);
-      if (loan) {
-        this.emitEvent({ type: 'loan_disbursed', data: loan });
-        return { success: true, loanId: loan.loan_id, message: 'Loan disbursed successfully' };
+        // Disburse loan
+        const loan = disbursalService.disburseLoan(offer);
+        if (loan) {
+          this.broadcast({ type: 'loan_disbursed', data: { ...loan, source } });
+          return { success: true, loanId: loan.loan_id, message: 'Loan disbursed successfully' };
+        } else {
+          return { success: false, message: 'Disbursal failed' };
+        }
       } else {
-        return { success: false, message: 'Disbursal failed' };
+        const declined = offerService.declineOffer(offer.offer_id);
+        if (declined) {
+          this.broadcast({ type: 'offer_declined', data: { ...offer, source } });
+          return { success: true, message: 'Offer declined' };
+        } else {
+          return { success: false, message: 'Unable to decline offer' };
+        }
       }
-    } else {
-      const declined = offerService.declineOffer(offer.offer_id);
-      if (declined) {
-        this.emitEvent({ type: 'offer_declined', data: offer });
-        return { success: true, message: 'Offer declined' };
-      } else {
-        return { success: false, message: 'Unable to decline offer' };
-      }
-    }
   }
 
   /**
    * Mark link as opened (user clicked SMS link)
    */
-  markLinkOpened(token: string): void {
+  markLinkOpened(token: string, source: 'auto' | 'user' = 'user'): void {
     const offer = offerService.getOfferByToken(token);
     if (offer) {
       offerService.markLinkOpened(offer.offer_id);
-      this.emitEvent({ type: 'link_opened', data: offer });
+      this.broadcast({ type: 'link_opened', data: { ...offer, source } });
     }
+  }
+
+  private scheduleAutoAdvance(offer: Offer): void {
+    if (!offer.consent_token) return;
+    if (process.env.AUTO_DEMO_FLOW === 'false') return;
+
+    const token = offer.consent_token;
+    setTimeout(() => this.markLinkOpened(token, 'auto'), 1200);
+    setTimeout(() => this.handleConsent(token, 'accept', 'auto'), 2800);
   }
 }
 
 export const orchestrator = new Orchestrator();
-
-

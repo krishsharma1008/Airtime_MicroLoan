@@ -13,6 +13,7 @@ import type {
   LedgerEvent,
   SmsMessage,
   ModelDecision,
+  JourneyEvent,
 } from '../types/schemas.js';
 
 export class InMemoryStore {
@@ -25,6 +26,7 @@ export class InMemoryStore {
   private ledger: LedgerEvent[] = [];
   private smsMessages: Map<string, SmsMessage> = new Map(); // message_id -> message
   private modelDecisions: Map<string, ModelDecision> = new Map(); // decision_id -> decision
+  private journeyEvents: Map<string, JourneyEvent[]> = new Map(); // msisdn -> journey timeline
 
   // User Profile methods
   getUser(msisdn: string): UserProfile | undefined {
@@ -70,6 +72,14 @@ export class InMemoryStore {
     const updates = this.balanceSnapshots.get(msisdn);
     if (!updates || updates.length === 0) return undefined;
     return updates[updates.length - 1];
+  }
+
+  getBalanceHistory(msisdn: string, limit: number = 50): BalanceUpdateEvent[] {
+    const updates = this.balanceSnapshots.get(msisdn) || [];
+    if (limit <= 0) {
+      return [...updates];
+    }
+    return updates.slice(-limit);
   }
 
   // Top-up methods
@@ -176,6 +186,38 @@ export class InMemoryStore {
     });
   }
 
+  resetUserState(msisdn: string): void {
+    this.callSessions.forEach((session, sessionId) => {
+      if (session.msisdn === msisdn) {
+        this.callSessions.delete(sessionId);
+      }
+    });
+
+    this.balanceSnapshots.delete(msisdn);
+    this.topUps.delete(msisdn);
+    this.journeyEvents.delete(msisdn);
+
+    this.offers.forEach((offer, offerId) => {
+      if (offer.msisdn === msisdn) {
+        this.offers.delete(offerId);
+      }
+    });
+
+    this.loans.forEach((loan, loanId) => {
+      if (loan.msisdn === msisdn) {
+        this.loans.delete(loanId);
+      }
+    });
+
+    this.smsMessages.forEach((message, messageId) => {
+      if (message.msisdn === msisdn) {
+        this.smsMessages.delete(messageId);
+      }
+    });
+
+    this.ledger = this.ledger.filter((event) => event.payload?.msisdn !== msisdn);
+  }
+
   // Model Decision methods
   setModelDecision(decision: ModelDecision): void {
     this.modelDecisions.set(decision.decision_id, decision);
@@ -183,6 +225,20 @@ export class InMemoryStore {
 
   getModelDecision(decisionId: string): ModelDecision | undefined {
     return this.modelDecisions.get(decisionId);
+  }
+
+  // Journey timeline methods
+  addJourneyEvent(msisdn: string, event: JourneyEvent): void {
+    if (!this.journeyEvents.has(msisdn)) {
+      this.journeyEvents.set(msisdn, []);
+    }
+    this.journeyEvents.get(msisdn)!.push(event);
+  }
+
+  getJourneyEvents(msisdn: string, limit: number = 50): JourneyEvent[] {
+    const events = this.journeyEvents.get(msisdn) || [];
+    const sorted = [...events].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    return sorted.slice(-limit);
   }
 
   // Clear all (for testing)
@@ -196,10 +252,9 @@ export class InMemoryStore {
     this.ledger = [];
     this.smsMessages.clear();
     this.modelDecisions.clear();
+    this.journeyEvents.clear();
   }
 }
 
 // Singleton instance
 export const store = new InMemoryStore();
-
-

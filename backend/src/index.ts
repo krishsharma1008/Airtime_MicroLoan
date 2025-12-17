@@ -12,6 +12,9 @@ import { store } from './store/inMemoryStore.js';
 import { PERSONAS, getAllPersonaNames } from './data/personas.js';
 import { ledgerService } from './services/ledgerService.js';
 import { offerService } from './services/offerService.js';
+import { journeyService } from './services/journeyService.js';
+import { seedInitialData, seedPersonaData } from './data/seed.js';
+import { customerService } from './services/customerService.js';
 import type { Offer } from './types/schemas.js';
 
 const app = express();
@@ -21,8 +24,43 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 app.use(cors());
 app.use(express.json());
 
+// Seed initial mock data so dashboard is populated on load
+seedInitialData();
+
 // Initialize orchestrator
 orchestrator.initialize();
+
+function buildUserSnapshot(msisdn: string) {
+  const user = store.getUser(msisdn);
+  if (!user) {
+    return null;
+  }
+
+  const balance = store.getLatestBalance(msisdn);
+  const balanceHistory = store.getBalanceHistory(msisdn, 50);
+  const activeCall = store.getActiveCallForUser(msisdn);
+  const activeOffer = store.getActiveOfferForUser(msisdn);
+  const activeLoan = store.getActiveLoanForUser(msisdn);
+  const loans = store.getLoansByMsisdn(msisdn);
+  const offers = store.getOffersByMsisdn(msisdn);
+  const topUps = store.getTopUps(msisdn);
+  const smsMessages = store.getSmsMessagesByMsisdn(msisdn);
+  const timeline = journeyService.getTimeline(msisdn, 50);
+
+  return {
+    user,
+    balance: balance?.balance || 0,
+    balanceHistory,
+    activeCall,
+    activeOffer,
+    activeLoan,
+    loans,
+    offers,
+    topUps,
+    smsMessages,
+    timeline,
+  };
+}
 
 // WebSocket connection handling
 const clients = new Set<any>();
@@ -75,18 +113,7 @@ app.post('/api/personas/:name/init', (req, res) => {
     return res.status(404).json({ error: 'Persona not found' });
   }
 
-  // Seed user
-  store.setUser(persona.msisdn, persona);
-
-  // Set initial balance
-  const balanceUpdate = {
-    event_type: 'balance_update' as const,
-    msisdn: persona.msisdn,
-    balance: 2.0, // Start with $2
-    timestamp: new Date(),
-    consumption_rate_per_min: 0.1,
-  };
-  store.addBalanceUpdate(persona.msisdn, balanceUpdate);
+  seedPersonaData(name);
 
   res.json({ success: true, msisdn: persona.msisdn });
 });
@@ -157,30 +184,35 @@ app.post('/api/consent', (req, res) => {
 // Get user data (for cockpit)
 app.get('/api/users/:msisdn', (req, res) => {
   const { msisdn } = req.params;
-  const user = store.getUser(msisdn);
-  if (!user) {
+  const snapshot = buildUserSnapshot(msisdn);
+  if (!snapshot) {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  const balance = store.getLatestBalance(msisdn);
-  const activeCall = store.getActiveCallForUser(msisdn);
-  const activeOffer = store.getActiveOfferForUser(msisdn);
-  const activeLoan = store.getActiveLoanForUser(msisdn);
-  const loans = store.getLoansByMsisdn(msisdn);
-  const offers = store.getOffersByMsisdn(msisdn);
-  const topUps = store.getTopUps(msisdn);
-  const smsMessages = store.getSmsMessagesByMsisdn(msisdn);
+  res.json(snapshot);
+});
+
+// Customer summaries
+app.get('/api/customers', (req, res) => {
+  const customers = customerService.getCustomerSummaries();
+  res.json({
+    customers,
+    updated_at: new Date().toISOString(),
+  });
+});
+
+app.get('/api/customers/:msisdn', (req, res) => {
+  const { msisdn } = req.params;
+  const summary = customerService.getCustomerSummary(msisdn);
+  const detail = buildUserSnapshot(msisdn);
+
+  if (!summary || !detail) {
+    return res.status(404).json({ error: 'Customer not found' });
+  }
 
   res.json({
-    user,
-    balance: balance?.balance || 0,
-    activeCall,
-    activeOffer,
-    activeLoan,
-    loans,
-    offers,
-    topUps,
-    smsMessages,
+    summary,
+    detail,
   });
 });
 
@@ -198,13 +230,23 @@ app.get('/api/loans', (req, res) => {
 
 // Get ledger events
 app.get('/api/ledger', (req, res) => {
-  const { entity_id, entity_type, limit } = req.query;
-  const events = ledgerService.getEventsForEntity(
-    entity_id as string,
-    entity_type as string
-  );
-  const limited = limit ? events.slice(0, Number(limit)) : events;
-  res.json({ events: limited });
+  const { entity_id, entity_type, limit, msisdn } = req.query;
+  let events;
+
+  if (entity_id) {
+    events = ledgerService.getEventsForEntity(
+      entity_id as string,
+      entity_type as string | undefined
+    );
+  } else if (msisdn) {
+    events = ledgerService
+      .getAllEvents(Number(limit) || 100)
+      .filter((event) => event.payload?.msisdn === msisdn);
+  } else {
+    events = ledgerService.getAllEvents(Number(limit) || 100);
+  }
+
+  res.json({ events });
 });
 
 // Get SMS messages (for demo inbox)
@@ -261,15 +303,33 @@ app.get('/api/kpis', (req, res) => {
   const offers = store.getAllOffers();
   const loans = store.getAllLoans();
   const smsMessages = store.getAllSmsMessages();
+  const users = store.getAllUsers();
 
   const totalOffers = offers.length;
   const acceptedOffers = offers.filter((o) => o.status === 'accepted' || o.status === 'disbursed').length;
   const declinedOffers = offers.filter((o) => o.status === 'declined').length;
   const acceptanceRate = totalOffers > 0 ? acceptedOffers / totalOffers : 0;
 
-  const activeLoans = loans.filter((l) => l.status === 'disbursed').length;
+  const activeLoanList = loans.filter((l) => ['pending', 'disbursed'].includes(l.status));
+  const activeLoans = activeLoanList.length;
   const repaidLoans = loans.filter((l) => l.status === 'repaid').length;
   const repaymentRate = loans.length > 0 ? repaidLoans / loans.length : 0;
+  const activeExposure = activeLoanList.reduce((sum, loan) => sum + loan.amount, 0);
+
+  const offersToday = offers.filter(
+    (offer) => Date.now() - offer.created_at.getTime() < 24 * 60 * 60 * 1000
+  ).length;
+
+  const activeCustomerSet = new Set<string>();
+  users.forEach((user) => {
+    if (
+      store.getActiveCallForUser(user.msisdn) ||
+      store.getActiveOfferForUser(user.msisdn) ||
+      store.getActiveLoanForUser(user.msisdn)
+    ) {
+      activeCustomerSet.add(user.msisdn);
+    }
+  });
 
   const deliveredSms = smsMessages.filter((m) => m.delivered).length;
   const deliveryRate = smsMessages.length > 0 ? deliveredSms / smsMessages.length : 0;
@@ -298,6 +358,14 @@ app.get('/api/kpis', (req, res) => {
     metrics: {
       avg_time_to_consent_seconds: avgTimeToConsent,
     },
+    company: {
+      total_customers: users.length,
+      active_customers: activeCustomerSet.size,
+      offers_today: offersToday,
+      active_exposure: activeExposure,
+      acceptance_rate: acceptanceRate,
+      repayment_rate: repaymentRate,
+    },
   });
 });
 
@@ -307,5 +375,3 @@ server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`WebSocket server running on ws://localhost:${PORT}/ws`);
 });
-
-
