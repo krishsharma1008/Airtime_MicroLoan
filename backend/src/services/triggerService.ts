@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { LowBalanceTriggerEvent, BalanceUpdateEvent } from '../types/schemas.js';
 import { store } from '../store/inMemoryStore.js';
 
-const LOW_BALANCE_THRESHOLD = 1.0; // $1.00 threshold for demo speed
+const LOW_BALANCE_THRESHOLD = 2.0; // Trigger earlier so offer arrives before balance hits zero
 const DEBOUNCE_MS = 3000; // 3 seconds - accelerate repeated triggers for the POC
 const COOLDOWN_MS = 60000; // 1 minute cooldown keeps pace with faster journeys
 

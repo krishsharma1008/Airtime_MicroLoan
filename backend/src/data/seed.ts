@@ -189,6 +189,16 @@ function createOfferFromSeed(profile: UserProfile, seed: OfferSeed, index: numbe
         ? daysAgo(seed.repaidDaysAgo)
         : undefined,
     };
+
+    // For demo personas, mark older "active" loans as repaid so they can receive new offers
+    if (
+      loan.status === 'disbursed' &&
+      seed.createdDaysAgo > 2
+    ) {
+      loan.status = 'repaid';
+      loan.repaid_at = daysAgo(Math.max(seed.createdDaysAgo - 1, 0));
+    }
+
     store.setLoan(loan);
   }
 

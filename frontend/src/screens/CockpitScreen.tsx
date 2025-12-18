@@ -118,6 +118,19 @@ const formatTime = (iso?: string) => {
   return new Date(iso).toLocaleTimeString()
 }
 
+const formatDuration = (totalSeconds: number): string => {
+  if (totalSeconds <= 0) return '00:00'
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const parts = [
+    hours > 0 ? String(hours).padStart(2, '0') : null,
+    String(minutes).padStart(2, '0'),
+    String(seconds).padStart(2, '0'),
+  ].filter(Boolean)
+  return parts.join(':')
+}
+
 const formatMetadataValue = (value: any): string => {
   if (value === null || value === undefined) return '—'
   if (value instanceof Date) return value.toLocaleString()
@@ -283,9 +296,15 @@ export default function CockpitScreen() {
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [highlightStep, setHighlightStep] = useState<string | null>(null)
   const [selectedJourneyEvent, setSelectedJourneyEvent] = useState<JourneyEvent | null>(null)
+  const [callDurationSeconds, setCallDurationSeconds] = useState(0)
+  const [offerModalOpen, setOfferModalOpen] = useState(false)
+  const [modalOffer, setModalOffer] = useState<Offer | null>(null)
+  const [modalAction, setModalAction] = useState<'idle' | 'accepting' | 'declining' | 'accepted' | 'declined'>('idle')
+  const [modalError, setModalError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const selectedRef = useRef<string | null>(null)
   const highlightTimeoutRef = useRef<number | null>(null)
+  const callTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     loadCustomers()
@@ -343,6 +362,56 @@ export default function CockpitScreen() {
       setExplainOffer(null)
     }
   }, [snapshot?.user?.msisdn])
+
+  useEffect(() => {
+    if (!snapshot?.activeOffer) {
+      setOfferModalOpen(false)
+      setModalOffer(null)
+      setModalError(null)
+      setModalAction('idle')
+      return
+    }
+
+    const offerStatus = snapshot.activeOffer.status
+    if (['created', 'sms_sent', 'link_opened'].includes(offerStatus)) {
+      if (!modalOffer || modalOffer.offer_id !== snapshot.activeOffer.offer_id) {
+        setModalOffer(snapshot.activeOffer)
+        setModalAction('idle')
+        setModalError(null)
+        setOfferModalOpen(true)
+      }
+    } else {
+      setOfferModalOpen(false)
+      setModalOffer(null)
+    }
+  }, [snapshot?.activeOffer?.offer_id, snapshot?.activeOffer?.status])
+
+  useEffect(() => {
+    if (callTimerRef.current) {
+      window.clearInterval(callTimerRef.current)
+      callTimerRef.current = null
+    }
+    if (!snapshot?.activeCall?.start_time) {
+      setCallDurationSeconds(0)
+      return
+    }
+
+    const updateDuration = () => {
+      const startTs = new Date(snapshot.activeCall!.start_time).getTime()
+      const seconds = Math.max(0, Math.floor((Date.now() - startTs) / 1000))
+      setCallDurationSeconds(seconds)
+    }
+
+    updateDuration()
+    callTimerRef.current = window.setInterval(updateDuration, 1000)
+
+    return () => {
+      if (callTimerRef.current) {
+        window.clearInterval(callTimerRef.current)
+        callTimerRef.current = null
+      }
+    }
+  }, [snapshot?.activeCall?.start_time])
 
   const loadCustomers = async () => {
     try {
@@ -489,6 +558,44 @@ export default function CockpitScreen() {
         setExplainLoading(false)
       }
     }
+  }
+
+  const handleOfferModalAction = async (action: 'accept' | 'decline') => {
+    if (!modalOffer?.consent_token) {
+      setModalError('Offer token unavailable.')
+      return
+    }
+    setModalAction(action === 'accept' ? 'accepting' : 'declining')
+    setModalError(null)
+    try {
+      const res = await fetch('/api/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: modalOffer.consent_token, action }),
+      })
+      const data = await res.json()
+      if (!data.success) {
+        throw new Error(data.message || 'Unable to process decision')
+      }
+      if (selectedMsisdn) {
+        await loadCustomerDetail(selectedMsisdn, false)
+        await loadLedger(selectedMsisdn)
+      }
+      setModalAction(action === 'accept' ? 'accepted' : 'declined')
+      setTimeout(() => {
+        setOfferModalOpen(false)
+      }, 1200)
+    } catch (err: any) {
+      setModalError(err?.message || 'Failed to process decision')
+      setModalAction('idle')
+    }
+  }
+
+  const dismissOfferModal = () => {
+    setOfferModalOpen(false)
+    setModalOffer(null)
+    setModalError(null)
+    setModalAction('idle')
   }
 
   const timeline = snapshot?.timeline || []
@@ -762,6 +869,13 @@ export default function CockpitScreen() {
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
+                {snapshot?.activeCall && (
+                  <div className="flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                    <Clock className="h-4 w-4" />
+                    <span>{formatDuration(callDurationSeconds)}</span>
+                    <span className="text-emerald-200/80">on call</span>
+                  </div>
+                )}
                 {snapshot?.activeCall ? (
                   <button
                     onClick={endCall}
@@ -1268,13 +1382,79 @@ export default function CockpitScreen() {
                       </p>
                     </div>
                   ))}
-                  {!ledgerEvents.length && <p>No ledger events yet.</p>}
+                  {!ledgerEvents.length && <p className="text-sm text-slate-500">No ledger events yet.</p>}
                 </div>
               )}
             </div>
           </section>
         </div>
       </div>
+      {offerModalOpen && modalOffer && (
+        <div className="fixed bottom-6 right-6 z-50 w-[min(22rem,calc(100%-1.5rem))] drop-shadow-2xl">
+          <div className="rounded-3xl border border-white/10 bg-slate-900/95 p-5 text-sm text-slate-200">
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-300/80">Loan offer</p>
+                <p className="mt-2 text-xl font-semibold text-white">${modalOffer.amount}</p>
+                <p className="text-xs text-slate-400">Session {modalOffer.session_id.slice(0, 6)}…</p>
+              </div>
+              <button
+                onClick={dismissOfferModal}
+                className="rounded-full border border-white/10 p-2 text-slate-400 transition hover:border-white/40 hover:text-white"
+                aria-label="Dismiss offer notification"
+              >
+                ✕
+              </button>
+            </div>
+
+            {(modalOffer.context_reasons?.length || modalOffer.reasons?.length) && (
+              <div className="mt-4 space-y-2 rounded-2xl bg-white/5 p-3 text-xs text-slate-300">
+                {modalOffer.context_reasons?.length ? (
+                  <p className="leading-relaxed">
+                    <span className="font-semibold text-white">Signals: </span>
+                    {modalOffer.context_reasons.slice(0, 2).join(' · ')}
+                  </p>
+                ) : null}
+                {modalOffer.reasons?.length ? (
+                  <p className="leading-relaxed">
+                    <span className="font-semibold text-white">Why now: </span>
+                    {modalOffer.reasons.slice(0, 2).join(' · ')}
+                  </p>
+                ) : null}
+              </div>
+            )}
+
+            {modalError && (
+              <p className="mt-3 rounded-xl bg-rose-500/10 px-3 py-2 text-xs text-rose-100">{modalError}</p>
+            )}
+            {modalAction === 'accepted' && (
+              <p className="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                Offer accepted. Disbursing airtime…
+              </p>
+            )}
+            {modalAction === 'declined' && (
+              <p className="mt-3 rounded-xl bg-slate-500/10 px-3 py-2 text-xs text-slate-100">Offer declined.</p>
+            )}
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button
+                onClick={() => handleOfferModalAction('accept')}
+                disabled={modalAction === 'accepting' || modalAction === 'declining'}
+                className="w-full rounded-2xl bg-emerald-400/90 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+              >
+                {modalAction === 'accepting' ? 'Accepting…' : 'Accept & continue'}
+              </button>
+              <button
+                onClick={() => handleOfferModalAction('decline')}
+                disabled={modalAction === 'accepting' || modalAction === 'declining'}
+                className="w-full rounded-2xl border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/50 disabled:opacity-60"
+              >
+                {modalAction === 'declining' ? 'Declining…' : 'Decline'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

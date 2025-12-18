@@ -13,6 +13,8 @@ import { repaymentService } from './repaymentService.js';
 import { store } from '../store/inMemoryStore.js';
 import { journeyService } from './journeyService.js';
 
+const AUTO_DEMO_FLOW_ENABLED = process.env.AUTO_DEMO_FLOW === 'true';
+
 export class Orchestrator {
   private eventCallbacks: ((event: any) => void)[] = [];
 
@@ -149,7 +151,7 @@ export class Orchestrator {
 
   private scheduleAutoAdvance(offer: Offer): void {
     if (!offer.consent_token) return;
-    if (process.env.AUTO_DEMO_FLOW === 'false') return;
+    if (!AUTO_DEMO_FLOW_ENABLED) return;
 
     const token = offer.consent_token;
     setTimeout(() => this.markLinkOpened(token, 'auto'), 1200);

@@ -9,8 +9,9 @@ import { featureStore } from './featureStore.js';
 import { modelService } from './modelService.js';
 
 const MIN_TENURE_DAYS = 30;
-const MIN_P_REPAY = 0.6; // Minimum probability of repayment
+const MIN_P_REPAY = 0.5; // Minimum probability of repayment (loosened so more personas qualify)
 const MIN_CONFIDENCE = 0.6;
+const ACTIVE_LOAN_COOLDOWN_MS = 24 * 60 * 60 * 1000; // allow new offers if prior loan is older than 24h
 
 export interface EligibilityResult {
   eligible: boolean;
@@ -59,13 +60,21 @@ export class EligibilityService {
 
     // Check for active unpaid loan
     const activeLoan = store.getActiveLoanForUser(msisdn);
-    if (activeLoan && activeLoan.status === 'disbursed') {
-      return {
-        eligible: false,
-        modelDecision: null,
-        reasons: ['Active loan already exists'],
-        approvedAmount: null,
-      };
+    if (activeLoan && ['pending', 'disbursed'].includes(activeLoan.status)) {
+      const disbursedAt = activeLoan.disbursed_at?.getTime();
+      const withinCooldown =
+        activeLoan.status === 'pending' ||
+        !disbursedAt ||
+        Date.now() - disbursedAt < ACTIVE_LOAN_COOLDOWN_MS;
+
+      if (withinCooldown) {
+        return {
+          eligible: false,
+          modelDecision: null,
+          reasons: ['Active loan cooling down'],
+          approvedAmount: null,
+        };
+      }
     }
 
     // Get feature vector and run model

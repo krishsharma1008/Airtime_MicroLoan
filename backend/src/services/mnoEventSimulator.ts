@@ -44,8 +44,8 @@ export class MnoEventSimulator {
     store.setCallSession(sessionId, callStart);
     this.emitEvent(callStart);
 
-    const latestBalance = store.getLatestBalance(msisdn)?.balance ?? 0;
-    const startingBalance = Math.max(2, latestBalance);
+    const latestBalance = store.getLatestBalance(msisdn)?.balance ?? 2;
+    const startingBalance = Math.min(Math.max(1.5, latestBalance), 4); // keep journeys snappy while showing gradual drop
     const initialBalanceUpdate: BalanceUpdateEvent = {
       event_type: 'balance_update',
       msisdn,
@@ -98,9 +98,9 @@ export class MnoEventSimulator {
 
     // Get current balance or start with a small amount
     let currentBalance = initialBalance || store.getLatestBalance(msisdn)?.balance || 2.0; // Start with $2
-    const intervalMs = 1000;
-    const consumptionRatePerMin = 60; // $1 per second
-    const depletionPerTick = 1; // Exactly $1 per tick
+    const intervalMs = 1200;
+    const consumptionRatePerMin = 6; // ~10 cents per second
+    const depletionPerTick = 0.1; // 10 cents per tick
 
     const key = `${msisdn}_${sessionId}`;
     const interval = setInterval(() => {
@@ -111,14 +111,14 @@ export class MnoEventSimulator {
         return;
       }
 
-      // Deplete balance ($1 per second)
-      currentBalance = Math.max(0, currentBalance - depletionPerTick);
+      // Deplete balance gradually in 10-cent increments
+      currentBalance = Math.max(0, Number((currentBalance - depletionPerTick).toFixed(2)));
 
       const balanceUpdate: BalanceUpdateEvent = {
         event_type: 'balance_update',
         msisdn,
         session_id: sessionId,
-        balance: currentBalance,
+        balance: Number(currentBalance.toFixed(2)),
         timestamp: new Date(),
         consumption_rate_per_min: consumptionRatePerMin,
       };
